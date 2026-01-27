@@ -1,0 +1,37 @@
+---
+# Deploy app from container image
+# Required: dokku_app with 'name', 'image', and optionally 'registry'
+
+- name: Validate container source requires image
+  ansible.builtin.assert:
+    that:
+      - dokku_app.image is defined
+    fail_msg: "dokku_app '{{ dokku_app.name }}' has app_source: container but no 'image' defined"
+
+- name: Validate registry configuration
+  ansible.builtin.assert:
+    that:
+      - dokku_app.registry.server is defined
+      - dokku_app.registry.username is defined
+      - dokku_app.registry.password is defined
+    fail_msg: "dokku_app '{{ dokku_app.name }}' has registry defined but missing required fields (server, username, password)"
+  when: dokku_app.registry is defined
+
+- name: Login to private registry
+  ansible.builtin.shell:
+    cmd: |
+      echo "{{ dokku_app.registry.password }}" | dokku registry:login --password-stdin "{{ dokku_app.registry.server }}" "{{ dokku_app.registry.username }}"
+  no_log: true
+  changed_when: false
+  when: dokku_app.registry is defined
+
+- name: Clear registry server setting (prevents scheduler from looking for wrong image)
+  ansible.builtin.shell:
+    cmd: dokku registry:set {{ dokku_app.name }} server
+  changed_when: false
+  when: dokku_app.registry is defined
+
+- name: Deploy container image
+  frkl.infra.dokku_image:
+    app: "{{ dokku_app.name }}"
+    image: "{{ dokku_app.image }}"

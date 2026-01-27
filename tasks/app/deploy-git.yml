@@ -1,0 +1,104 @@
+---
+# Deploy app from git repository
+# Required: dokku_app with 'name', 'repository'
+# Optional: 'version' (branch/tag/commit), 'build' (default: true)
+# Optional: 'git_auth' (HTTPS credentials) or 'git_ssh' (SSH key for private repos)
+
+- name: Validate git source requires repository
+  ansible.builtin.assert:
+    that:
+      - dokku_app.repository is defined
+    fail_msg: "dokku_app '{{ dokku_app.name }}' has app_source: git but no 'repository' defined"
+
+# --- HTTPS Authentication (git_auth) ---
+- name: Validate git_auth configuration
+  ansible.builtin.assert:
+    that:
+      - dokku_app.git_auth.host is defined
+      - dokku_app.git_auth.username is defined
+      - dokku_app.git_auth.password is defined
+    fail_msg: "git_auth requires host, username, and password"
+  when: dokku_app.git_auth is defined
+
+- name: Allow git host in known_hosts (HTTPS)
+  ansible.builtin.shell:
+    cmd: dokku git:allow-host "{{ dokku_app.git_auth.host }}"
+  changed_when: false
+  when: dokku_app.git_auth is defined
+
+- name: Set git credentials for private repository
+  ansible.builtin.shell:
+    cmd: dokku git:auth "{{ dokku_app.git_auth.host }}" "{{ dokku_app.git_auth.username }}" "{{ dokku_app.git_auth.password }}"
+  no_log: true
+  changed_when: false
+  when: dokku_app.git_auth is defined
+
+# --- SSH Authentication (git_ssh) ---
+- name: Validate git_ssh configuration
+  ansible.builtin.assert:
+    that:
+      - dokku_app.git_ssh.host is defined
+      - dokku_app.git_ssh.private_key is defined or dokku_app.git_ssh.key_file is defined
+    fail_msg: "git_ssh requires host and either private_key or key_file"
+  when: dokku_app.git_ssh is defined
+
+- name: Read SSH key from file
+  ansible.builtin.slurp:
+    src: "{{ dokku_app.git_ssh.key_file }}"
+  register: _ssh_key_file
+  delegate_to: localhost
+  become: false
+  when: dokku_app.git_ssh is defined and dokku_app.git_ssh.key_file is defined
+
+- name: Set SSH key content fact
+  ansible.builtin.set_fact:
+    _ssh_key_content: "{{ dokku_app.git_ssh.private_key | default(_ssh_key_file.content | b64decode) }}"
+  when: dokku_app.git_ssh is defined
+  no_log: true
+
+- name: Ensure dokku SSH directory exists
+  ansible.builtin.file:
+    path: /home/dokku/.ssh
+    state: directory
+    owner: dokku
+    group: dokku
+    mode: "0700"
+  when: dokku_app.git_ssh is defined
+
+- name: Deploy SSH key for git access
+  ansible.builtin.copy:
+    content: "{{ _ssh_key_content }}"
+    dest: /home/dokku/.ssh/id_deploy_{{ dokku_app.name }}
+    owner: dokku
+    group: dokku
+    mode: "0600"
+  no_log: true
+  when: dokku_app.git_ssh is defined
+
+- name: Configure SSH to use deploy key for host
+  ansible.builtin.blockinfile:
+    path: /home/dokku/.ssh/config
+    create: true
+    owner: dokku
+    group: dokku
+    mode: "0600"
+    marker: "# {mark} ANSIBLE MANAGED - {{ dokku_app.name }}"
+    block: |
+      Host {{ dokku_app.git_ssh.host }}
+        IdentityFile /home/dokku/.ssh/id_deploy_{{ dokku_app.name }}
+        StrictHostKeyChecking no
+  when: dokku_app.git_ssh is defined
+
+- name: Allow git host in known_hosts (SSH)
+  ansible.builtin.shell:
+    cmd: dokku git:allow-host "{{ dokku_app.git_ssh.host }}"
+  changed_when: false
+  when: dokku_app.git_ssh is defined
+
+# --- Deploy ---
+- name: Deploy from git repository
+  frkl.infra.dokku_clone:
+    app: "{{ dokku_app.name }}"
+    repository: "{{ dokku_app.repository }}"
+    version: "{{ dokku_app.version | default(omit) }}"
+    build: "{{ dokku_app.build | default(true) }}"

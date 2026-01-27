@@ -1,0 +1,68 @@
+---
+# Manage Dokku plugins
+# Required variable: dokku_plugins (list of dicts with name and url)
+#
+# This is modelled after the plugin tasks in main.yml, but made into
+# its own task list so it can be executed independently.
+#
+# Auto-adds letsencrypt plugin if any app has ssl: true
+
+# Build the effective plugin list
+- name: Check if any app requires SSL
+  ansible.builtin.set_fact:
+    _dokku_needs_letsencrypt: "{{ dokku_apps | default([]) | selectattr('ssl', 'defined') | selectattr('ssl', 'equalto', true) | list | length > 0 }}"
+
+- name: Check if letsencrypt plugin already in list
+  ansible.builtin.set_fact:
+    _dokku_has_letsencrypt: "{{ dokku_plugins | default([]) | selectattr('url', 'equalto', 'https://github.com/dokku/dokku-letsencrypt.git') | list | length > 0 }}"
+
+- name: Build effective plugin list
+  ansible.builtin.set_fact:
+    _dokku_effective_plugins: >-
+      {{
+        dokku_plugins | default([]) +
+        ([{'name': 'letsencrypt', 'url': 'https://github.com/dokku/dokku-letsencrypt.git'}]
+         if (_dokku_needs_letsencrypt and not _dokku_has_letsencrypt) else [])
+      }}
+
+# Install plugins (from ansible-dokku pattern)
+- name: Get installed dokku plugins
+  ansible.builtin.command: dokku plugin:list
+  changed_when: false
+  register: _dokku_installed_plugins
+  when: _dokku_effective_plugins | length > 0
+
+- name: Install plugin dependencies (apt)
+  ansible.builtin.apt:
+    name:
+      - moreutils
+      - rsync
+      - cron
+    state: present
+  when: _dokku_effective_plugins | length > 0
+
+- name: Install dokku plugin
+  ansible.builtin.command: dokku plugin:install {{ item.url }} --name {{ item.name }}
+  loop: "{{ _dokku_effective_plugins }}"
+  when:
+    - _dokku_effective_plugins | length > 0
+    - _dokku_installed_plugins.stdout.find(item.name) == -1
+  changed_when: true
+
+- name: Set up plugin update cron for
+  ansible.builtin.cron:
+    name: "dokku plugin:update {{ item.name }}"
+    minute: "0"
+    hour: "12"
+    user: root
+    job: "/usr/bin/chronic /usr/bin/dokku plugin:update {{ item.name }}"
+    cron_file: "dokku-plugin-update-{{ item.name }}"
+  loop: "{{ _dokku_effective_plugins }}"
+  when:
+    - _dokku_effective_plugins | length > 0
+    - not item.url.endswith('.tar.gz')
+
+- name: Install plugin dependencies
+  ansible.builtin.command: dokku plugin:install-dependencies
+  when: _dokku_effective_plugins | length > 0
+  changed_when: false

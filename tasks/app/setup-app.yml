@@ -1,0 +1,125 @@
+---
+# Setup a Dokku app (create app, configure services, env, storage, proxy, ports, domains)
+# Does NOT deploy - use separate deployment task for that
+# Required: dokku_app.name
+#
+# This file is NOT part of upstream ansible-dokku.
+# It uses the dokku modules from this role's library/ directory.
+
+# --- Services (create before linking) ---
+- name: Create required services
+  dokku_service_create:
+    service: "{{ item.service }}"
+    name: "{{ item.name }}"
+  loop: "{{ dokku_app.services | default([]) }}"
+  when: dokku_app.services is defined
+
+# --- Create app first (so we can configure before deploying) ---
+- name: Create Dokku app
+  dokku_app:
+    app: "{{ dokku_app.name }}"
+
+# --- Git configuration (keep .git dir, rev env var, deploy branch) ---
+- name: Configure git options
+  dokku_git_config:
+    app: "{{ dokku_app.name }}"
+    keep_git_dir: "{{ dokku_app.git_config.keep_git_dir | default(omit) }}"
+    rev_env_var: "{{ dokku_app.git_config.rev_env_var | default(omit) }}"
+    deploy_branch: "{{ dokku_app.git_config.deploy_branch | default(omit) }}"
+  when: dokku_app.git_config is defined
+
+# --- Environment variables from env file (before deploy so app starts with correct config) ---
+- name: Read env file
+  ansible.builtin.slurp:
+    src: "{{ dokku_app.env_file }}"
+  register: _env_file_content
+  delegate_to: localhost
+  become: false
+  when: dokku_app.env_file is defined
+
+- name: Parse env file lines
+  ansible.builtin.set_fact:
+    _env_file_lines: "{{ (_env_file_content.content | b64decode).split('\n') | reject('match', '^\\s*#') | reject('match', '^\\s*$') | map('regex_replace', '^\\s*export\\s+', '') | select('match', '^[^=]+=') | list }}"
+  when: dokku_app.env_file is defined and _env_file_content is defined
+
+- name: Build env config dict
+  ansible.builtin.set_fact:
+    _parsed_env_config: "{{ _parsed_env_config | default({}) | combine({(item.split('=', 1))[0]: (item.split('=', 1))[1]}) }}"
+  loop: "{{ _env_file_lines }}"
+  when: _env_file_lines is defined and _env_file_lines | length > 0
+
+# Debug task for env file parsing - set debug_env_file=true to enable
+- name: Debug env file parsing
+  ansible.builtin.debug:
+    msg:
+      raw_lines: "{{ (_env_file_content.content | b64decode).split('\n') | list }}"
+      after_reject_comments: "{{ (_env_file_content.content | b64decode).split('\n') | reject('match', '^\\s*#') | list }}"
+      after_reject_empty: "{{ (_env_file_content.content | b64decode).split('\n') | reject('match', '^\\s*#') | reject('match', '^\\s*$') | list }}"
+      parsed_lines: "{{ _env_file_lines | default([]) }}"
+      parsed_config: "{{ _parsed_env_config | default({}) }}"
+  when: debug_env_file | default(false)
+
+- name: Set environment variables from env file
+  dokku_config:
+    app: "{{ dokku_app.name }}"
+    config: "{{ _parsed_env_config }}"
+    restart: "{{ dokku_app.restart_after_config | default(false) }}"
+  when: _parsed_env_config is defined
+
+# --- Environment variables (before deploy so app starts with correct config) ---
+- name: Set environment variables
+  dokku_config:
+    app: "{{ dokku_app.name }}"
+    config: "{{ dokku_app.environment }}"
+    restart: false # No container running yet
+  when: dokku_app.environment is defined and dokku_app.environment | length > 0
+
+# --- Storage mounts (before deploy so volumes are available) ---
+- name: Configure storage mounts
+  dokku_storage:
+    app: "{{ dokku_app.name }}"
+    mounts: "{{ dokku_app.storage.mounts }}"
+    create_host_dir: "{{ dokku_app.storage.create_host_dir | default(true) }}"
+    user: "{{ dokku_app.storage.user | default('32767') }}"
+    group: "{{ dokku_app.storage.group | default('32767') }}"
+  when: dokku_app.storage is defined and dokku_app.storage.mounts is defined
+
+# --- Service linking (before deploy so env vars are injected) ---
+- name: Link services to app
+  dokku_service_link:
+    app: "{{ dokku_app.name }}"
+    service: "{{ item.service }}"
+    name: "{{ item.name }}"
+  loop: "{{ dokku_app.services | default([]) }}"
+  when: dokku_app.services is defined
+
+# --- Proxy (enable/disable nginx proxy for the app) ---
+- name: Configure proxy
+  dokku_proxy:
+    app: "{{ dokku_app.name }}"
+    state: "{{ 'present' if (dokku_app.proxy | default(true)) else 'absent' }}"
+  when: dokku_app.proxy is defined
+
+# --- Ports (clear existing mappings if requested) ---
+- name: Clear port mappings
+  dokku_ports:
+    app: "{{ dokku_app.name }}"
+    mappings: []
+    state: clear
+  when: dokku_app.ports_clear | default(false)
+
+# --- Ports (set explicit port mappings) ---
+- name: Configure port mappings
+  dokku_ports:
+    app: "{{ dokku_app.name }}"
+    mappings: "{{ dokku_app.ports }}"
+    state: present
+  when: dokku_app.ports is defined and dokku_app.ports | length > 0
+
+# --- Domains ---
+- name: Set domains
+  dokku_domains:
+    app: "{{ dokku_app.name }}"
+    domains: "{{ dokku_app.domains }}"
+    state: set
+  when: dokku_app.domains is defined and dokku_app.domains | length > 0

@@ -1,0 +1,42 @@
+---
+# Setup a Dokku app
+# Required variable: dokku_app (dict with app configuration)
+#
+# This file is NOT part of upstream ansible-dokku.
+# It provides a high-level interface for setting up apps using the dokku modules.
+#
+# Architecture:
+#   - dokku/setup-app.yml: Creates app, services, env, storage, proxy, ports, domains
+#   - dokku/deploy-container.yml: Deploys from container image (when app_source == 'container')
+#   - dokku/deploy-git.yml: Deploys from git repository (when app_source == 'git')
+#   - dokku/setup-ssl.yml: Configures Let's Encrypt SSL
+
+- name: Validate app configuration
+  ansible.builtin.assert:
+    that:
+      - dokku_app.name is defined
+      - dokku_app.app_source is defined
+      - dokku_app.app_source in ['container', 'git']
+    fail_msg: "dokku_app must have 'name' and valid 'app_source' (container, git)"
+
+- name: Validate SSL configuration requires email
+  ansible.builtin.assert:
+    that:
+      - dokku_app.email is defined
+    fail_msg: "dokku_app '{{ dokku_app.name }}' has ssl: true but no 'email' defined (required for Let's Encrypt)"
+  when: dokku_app.ssl | default(false)
+
+- name: Setup dokku app
+  ansible.builtin.include_tasks: app/setup-app.yml
+
+- name: Deploy from container image
+  ansible.builtin.include_tasks: app/deploy-container.yml
+  when: dokku_app.app_source == 'container'
+
+- name: Deploy from git repository
+  ansible.builtin.include_tasks: app/deploy-git.yml
+  when: dokku_app.app_source == 'git'
+
+- name: Setup SSL
+  ansible.builtin.include_tasks: app/setup-ssl.yml
+  when: dokku_app.ssl | default(false)

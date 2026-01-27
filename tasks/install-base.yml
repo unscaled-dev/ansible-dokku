@@ -1,0 +1,17 @@
+---
+- import_tasks: init.yml
+
+- import_tasks: nginx.yml
+  tags:
+    - dokku
+    - dokku-nginx
+
+- import_tasks: install.yml
+  tags:
+    - dokku
+    - dokku-install
+
+- import_tasks: dokku-daemon.yml
+  tags:
+    - dokku
+    - dokku-daemon
