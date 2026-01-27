@@ -20,10 +20,11 @@
     app: "{{ dokku_app.name }}"
 
 # --- Git configuration (keep .git dir, rev env var, deploy branch) ---
+# Note: keep_git_dir must be lowercase string "true"/"false" for Dokku
 - name: Configure git options
   dokku_git_config:
     app: "{{ dokku_app.name }}"
-    keep_git_dir: "{{ dokku_app.git_config.keep_git_dir | default(omit) }}"
+    keep_git_dir: "{{ (dokku_app.git_config.keep_git_dir | string | lower) if dokku_app.git_config.keep_git_dir is defined else omit }}"
     rev_env_var: "{{ dokku_app.git_config.rev_env_var | default(omit) }}"
     deploy_branch: "{{ dokku_app.git_config.deploy_branch | default(omit) }}"
   when: dokku_app.git_config is defined

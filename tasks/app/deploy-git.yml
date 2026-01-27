@@ -95,6 +95,28 @@
   changed_when: false
   when: dokku_app.git_ssh is defined
 
+# --- Builder configuration (must be set before deploy) ---
+- name: Set builder type
+  dokku_builder:
+    app: "{{ dokku_app.name }}"
+    property: selected
+    value: "{{ dokku_app.builder.type }}"
+  when: dokku_app.builder is defined and dokku_app.builder.type is defined
+
+# Dockerfile-specific settings use builder-dockerfile:set (not builder:set)
+- name: Set dockerfile path
+  ansible.builtin.shell:
+    cmd: dokku builder-dockerfile:set "{{ dokku_app.name }}" dockerfile-path "{{ dokku_app.builder.dockerfile_path }}"
+  when: dokku_app.builder is defined and dokku_app.builder.dockerfile_path is defined
+  changed_when: true
+
+- name: Set build directory
+  dokku_builder:
+    app: "{{ dokku_app.name }}"
+    property: build-dir
+    value: "{{ dokku_app.builder.build_dir }}"
+  when: dokku_app.builder is defined and dokku_app.builder.build_dir is defined
+
 # --- Deploy ---
 - name: Deploy from git repository
   frkl.infra.dokku_clone:
