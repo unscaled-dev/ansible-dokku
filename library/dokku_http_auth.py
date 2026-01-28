@@ -9,6 +9,13 @@ DOCUMENTATION = """
 ---
 module: dokku_http_auth
 short_description: Manage HTTP Basic Authentication for a dokku app
+description:
+  - Enable or disable HTTP Basic Authentication for a dokku app.
+  - "SECURITY NOTE: When enabling http-auth, the password is passed as a CLI argument
+    to 'dokku http-auth:on'. This means the password may be briefly visible in process
+    listings (ps aux) during execution. This is a limitation of the dokku CLI and cannot
+    be fully mitigated. The password parameter is marked no_log to prevent it from
+    appearing in Ansible output."
 options:
   app:
     description:

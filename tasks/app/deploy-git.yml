@@ -49,6 +49,7 @@
   delegate_to: localhost
   become: false
   when: dokku_app.git_ssh is defined and dokku_app.git_ssh.key_file is defined
+  no_log: true
 
 - name: Set SSH key content fact
   ansible.builtin.set_fact:

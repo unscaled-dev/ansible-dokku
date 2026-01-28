@@ -37,19 +37,23 @@
   delegate_to: localhost
   become: false
   when: dokku_app.env_file is defined
+  no_log: true
 
 - name: Parse env file lines
   ansible.builtin.set_fact:
     _env_file_lines: "{{ (_env_file_content.content | b64decode).split('\n') | reject('match', '^\\s*#') | reject('match', '^\\s*$') | map('regex_replace', '^\\s*export\\s+', '') | select('match', '^[^=]+=') | list }}"
   when: dokku_app.env_file is defined and _env_file_content is defined
+  no_log: true
 
 - name: Build env config dict
   ansible.builtin.set_fact:
     _parsed_env_config: "{{ _parsed_env_config | default({}) | combine({(item.split('=', 1))[0]: (item.split('=', 1))[1]}) }}"
   loop: "{{ _env_file_lines }}"
   when: _env_file_lines is defined and _env_file_lines | length > 0
+  no_log: true
 
 # Debug task for env file parsing - set debug_env_file=true to enable
+# WARNING: This debug task will expose sensitive environment variables when enabled
 - name: Debug env file parsing
   ansible.builtin.debug:
     msg:
@@ -59,6 +63,7 @@
       parsed_lines: "{{ _env_file_lines | default([]) }}"
       parsed_config: "{{ _parsed_env_config | default({}) }}"
   when: debug_env_file | default(false)
+  no_log: true
 
 - name: Set environment variables from env file
   dokku_config:
